@@ -641,20 +641,20 @@ class AutoLogin:
         return False
     
     def keepalive(self, page):
-        """保活 - 强制使用指定的目标区域 URL"""
-        self.log("开始执行保活任务...", "STEP")
+        """保活 - 使用检测到的区域 URL"""
+        self.log("保活...", "STEP")
         
-        # 🌟 强制拼接目标区域的 URL (忽略系统默认重定向的区域)
-        base_url = f"https://{TARGET_REGION}.run.claw.cloud"
-        self.log(f"强制跳转至目标区域: {TARGET_REGION} ({base_url})", "INFO")
+        # 恢复顺其自然：使用系统分配/检测到的区域 URL
+        base_url = self.get_base_url()
+        self.log(f"使用区域 URL: {base_url}", "INFO")
         
         pages_to_visit = [
             (f"{base_url}/", "控制台"),
             (f"{base_url}/apps", "应用"),
         ]
         
-        # 将最终显示的区域修正为目标区域
-        self.detected_region = TARGET_REGION
+        if self.detected_region:
+            self.log(f"当前所处区域: {self.detected_region}", "INFO")
         
         for url, name in pages_to_visit:
             try:
@@ -662,7 +662,7 @@ class AutoLogin:
                 page.wait_for_load_state('networkidle', timeout=15000)
                 self.log(f"已访问: {name} ({url})", "SUCCESS")
                 
-                # 更新一下状态，确认没被踢出去
+                # 再次检测区域（以防中途跳转）
                 current_url = page.url
                 if 'claw.cloud' in current_url:
                     self.detect_region(current_url)
