@@ -28,6 +28,8 @@ SIGNIN_URL = f"{LOGIN_ENTRY_URL}/signin"
 DEVICE_VERIFY_WAIT = 30  # Mobile验证 默认等 30 秒
 TWO_FACTOR_WAIT = int(os.environ.get("TWO_FACTOR_WAIT", "120"))  # 2FA验证 默认等 120 秒
 
+# 🌟 新增：强制保活的目标区域 (Japan)
+TARGET_REGION = os.environ.get("TARGET_REGION", "ap-northeast-1")
 
 class Telegram:
     """Telegram 通知"""
@@ -225,39 +227,37 @@ class AutoLogin:
     def detect_region(self, url):
         """
         从 URL 中检测区域信息
-        例如: https://ap-southeast-1.console.claw.cloud/... -> ap-southeast-1
         """
         try:
             parsed = urlparse(url)
-            host = parsed.netloc  # 如 "ap-southeast-1.console.claw.cloud"
+            host = parsed.netloc  
             
-            # 检查是否是区域子域名格式
-            # 格式: {region}.console.claw.cloud
-            if host.endswith('.console.claw.cloud'):
-                region = host.replace('.console.claw.cloud', '')
+            # 兼容 .console.claw.cloud 和 .run.claw.cloud 两种格式
+            if host.endswith('.console.claw.cloud') or host.endswith('.run.claw.cloud'):
+                region = host.replace('.console.claw.cloud', '').replace('.run.claw.cloud', '')
                 if region and region != 'console':  # 排除无效情况
                     self.detected_region = region
                     self.region_base_url = f"https://{host}"
-                    self.log(f"检测到区域: {region}", "SUCCESS")
-                    self.log(f"区域 URL: {self.region_base_url}", "INFO")
+                    self.log(f"当前所处区域: {region}", "SUCCESS")
                     return region
             
             # 如果是主域名 console.run.claw.cloud，可能还没跳转
             if 'console.run.claw.cloud' in host or 'claw.cloud' in host:
-                # 尝试从路径或其他地方提取区域信息
-                # 有些平台可能在路径中包含区域，如 /region/ap-southeast-1/...
                 path = parsed.path
                 region_match = re.search(r'/(?:region|r)/([a-z]+-[a-z]+-\d+)', path)
                 if region_match:
                     region = region_match.group(1)
                     self.detected_region = region
-                    self.region_base_url = f"https://{region}.console.claw.cloud"
+                    self.region_base_url = f"https://{region}.run.claw.cloud"
                     self.log(f"从路径检测到区域: {region}", "SUCCESS")
                     return region
             
             self.log(f"未检测到特定区域，使用当前域名: {host}", "INFO")
-            # 如果没有检测到区域，使用当前 URL 的基础部分
             self.region_base_url = f"{parsed.scheme}://{parsed.netloc}"
+            return None
+            
+        except Exception as e:
+            self.log(f"区域检测异常: {e}", "WARN")
             return None
             
         except Exception as e:
@@ -641,21 +641,20 @@ class AutoLogin:
         return False
     
     def keepalive(self, page):
-        """保活 - 使用检测到的区域 URL"""
-        self.log("保活...", "STEP")
+        """保活 - 强制使用指定的目标区域 URL"""
+        self.log("开始执行保活任务...", "STEP")
         
-        # 使用检测到的区域 URL，如果没有则使用默认
-        base_url = self.get_base_url()
-        self.log(f"使用区域 URL: {base_url}", "INFO")
+        # 🌟 强制拼接目标区域的 URL (忽略系统默认重定向的区域)
+        base_url = f"https://{TARGET_REGION}.run.claw.cloud"
+        self.log(f"强制跳转至目标区域: {TARGET_REGION} ({base_url})", "INFO")
         
         pages_to_visit = [
             (f"{base_url}/", "控制台"),
             (f"{base_url}/apps", "应用"),
         ]
         
-        # 如果检测到了区域，可以额外访问一些区域特定页面
-        if self.detected_region:
-            self.log(f"当前区域: {self.detected_region}", "INFO")
+        # 将最终显示的区域修正为目标区域
+        self.detected_region = TARGET_REGION
         
         for url, name in pages_to_visit:
             try:
@@ -663,7 +662,7 @@ class AutoLogin:
                 page.wait_for_load_state('networkidle', timeout=15000)
                 self.log(f"已访问: {name} ({url})", "SUCCESS")
                 
-                # 再次检测区域（以防中途跳转）
+                # 更新一下状态，确认没被踢出去
                 current_url = page.url
                 if 'claw.cloud' in current_url:
                     self.detect_region(current_url)
